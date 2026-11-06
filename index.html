@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light">
 <title>Sapphire Lake Trail</title>
 <link rel="icon" href="favicon.png">
@@ -23,7 +23,7 @@
   html,body{height:100%;margin:0}
   body{font:15px/1.4 var(--body-font);
     color:var(--ink);background:var(--bg);overflow:hidden}
-  .mapwrap{position:relative;height:100vh;width:100%;min-width:0}
+  .mapwrap{position:relative;height:100vh;height:100dvh;width:100%;min-width:0}
   #map{position:absolute;inset:0}
   #ribbon{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}
 
@@ -85,9 +85,32 @@
   .wsrc{font-size:10px;color:#3f4f6e;text-align:right;white-space:nowrap;margin:0}
   .dot{width:16px;height:16px;border-radius:50%;background:#fff;border:3px solid var(--sapphire);box-shadow:0 0 0 2px rgba(0,0,0,.3)}
   .pin{width:12px;height:12px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 3px rgba(0,0,0,.5)}
+  /* the three stat cards live in a pager: on desktop it's invisible (cards stack in the side panel as before),
+     on phones it becomes a swipeable row */
+  .pager-wrap,.pager{display:contents}
+
   @media (max-width: 820px){
-    .mapwrap{height:100vh}
-    aside{top:auto;bottom:-8px;right:-8px;left:-8px;width:auto;max-height:45vh}
+    .mapwrap{height:100vh;height:100dvh}
+    /* bottom sheet: stats pager on top, title card at the very bottom */
+    aside{top:auto;left:0;right:0;bottom:0;width:auto;max-height:none;overflow:visible;gap:6px;
+      padding:10px 12px calc(10px + env(safe-area-inset-bottom,0px))}
+    .pager-wrap{display:block;order:1;pointer-events:none}
+    aside>.card{order:2}                                   /* title card */
+    /* pager bleeds to the screen edges so a sliver of the next card peeks in from the right */
+    .pager{display:flex;gap:10px;position:relative;overflow-x:auto;overflow-y:hidden;
+      scroll-snap-type:x mandatory;scroll-padding:0 12px;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scrollbar-width:none;
+      padding:6px 12px 10px;margin:-6px -12px -10px}       /* extra padding so card shadows aren't clipped */
+    .pager::-webkit-scrollbar{display:none}
+    .pager>.card{flex:0 0 calc(100% - 28px);min-width:0;scroll-snap-align:start;scroll-snap-stop:always}   /* narrower than the row so the next card's edge shows */
+    .card{padding:12px 16px;border-radius:18px}
+    h1{font-size:27px}
+    h2{margin:0 0 6px}
+    .span{margin:2px 0 8px}
+    .legend{margin-top:8px}
+    .seg button{padding:10px 8px;font-size:14px}           /* bigger tap targets */
+    .whead{flex-wrap:wrap;row-gap:0}
+    /* keep Mapbox's scale bar, logo and attribution visible just above the sheet */
+    .mapboxgl-ctrl-bottom-left,.mapboxgl-ctrl-bottom-right{bottom:var(--panel-h,0px)}
   }
 </style>
 </head>
@@ -118,6 +141,9 @@
     </div>
   </div>
 
+  <!-- Trip / Ribbon / Weather: stacked on desktop, swipe left/right on phones -->
+  <div class="pager-wrap">
+  <div class="pager" id="pager">
   <div class="card">
     <h2 id="tripH">Trip</h2>
     <div class="span"><div class="span-full"></div></div>
@@ -139,6 +165,8 @@
     </div>
     <div class="wgrid" id="wStats"></div>
   </div>
+  </div><!-- /pager -->
+  </div><!-- /pager-wrap -->
 </aside>
 
 <!-- Optional: paste the full contents of your .gpx file between these tags and the page will load it without needing a server -->
@@ -179,6 +207,7 @@ const $ = s => document.querySelector(s);
 const HAS_KEY = CONFIG.MAPBOX_TOKEN && CONFIG.MAPBOX_TOKEN !== 'YOUR_MAPBOX_TOKEN';
 if(HAS_KEY) mapboxgl.accessToken=CONFIG.MAPBOX_TOKEN;
 const SAPPHIRE='#0a2f73', SAPPHIRE_DEEP='#0a2f73', MIN_RIBBON=15;
+const TOUCH=window.matchMedia('(hover: none)').matches;   // phones/tablets: no mouse hover, so make drag handles easier to see and hit
 let metric='elevation';
 let T=null, cursor=0, ra=0, rb=1, ranges={}, trailGeo=null;
 let hikeTimes={}, wxKey='';
@@ -278,35 +307,46 @@ const mkPin=c=>{const e=document.createElement('div');e.className='pin';e.style.
 const startMk=mkPin('#52ba0f'), endMk=mkPin('#ba0f52');
 const line=coords=>({type:'Feature',properties:{},geometry:{type:'LineString',coordinates:coords}});
 
+/* The trail is added as soon as BOTH the GPX and the map style are ready, in whichever order they arrive.
+   (Before, it relied on map.isStyleLoaded(), which also returns false while terrain/tiles are still loading, so
+   when the GPX won the race against the tiles the trail was silently never added.)
+   This is safe to call any number of times: it does nothing once the trail is on the map, and it quietly
+   gives up if the style isn't ready yet — we call it again on every style/load/idle event below. */
+let trailShown=null;   // the trail data currently on the map
 function setupLayers(){
   if(!T||!trailGeo) return;
-  if(!map.getSource('trail')){
-    map.addSource('trail',{type:'geojson',data:trailGeo});
-    const cap={'line-cap':'round','line-join':'round'};
-    const firstLabel=(map.getStyle().layers.find(l=>l.type==='symbol')||{}).id;   // slot the trail just under the basemap's labels
-    map.addLayer({id:'trail',type:'line',source:'trail',layout:cap,paint:{'line-color':SAPPHIRE_DEEP,'line-width':4}},firstLabel);
-  }
-  applyMapData();
-}
-function setupTerrain(){
-  if(!CONFIG.TERRAIN||!HAS_KEY) return;
   try{
-    if(!map.getSource('trail-dem')) map.addSource('trail-dem',{type:'raster-dem',url:'mapbox://mapbox.mapbox-terrain-dem-v1',tileSize:512,maxzoom:14});
-    map.setTerrain({source:'trail-dem',exaggeration:CONFIG.TERRAIN_EXAGGERATION});
-  }catch(err){ console.warn('3D terrain unavailable, using the flat map:',err); try{map.setTerrain(null);}catch(e){} }
+    const src=map.getSource('trail');
+    if(src&&trailShown!==trailGeo){ src.setData(trailGeo); trailShown=trailGeo; }
+    if(src&&map.getLayer('trail')) return;                       // already there
+    if(!src){ map.addSource('trail',{type:'geojson',data:trailGeo}); trailShown=trailGeo; }
+    const firstLabel=(map.getStyle().layers.find(l=>l.type==='symbol')||{}).id;   // slot the trail just under the basemap's labels
+    map.addLayer({id:'trail',type:'line',source:'trail',layout:{'line-cap':'round','line-join':'round'},
+      paint:{'line-color':SAPPHIRE_DEEP,'line-width':4}},firstLabel);
+  }catch(err){ /* style not ready yet: the next event will retry */ }
 }
-/* if the elevation tiles can't be loaded (key not allowed, offline…) switch terrain off so the flat map still shows */
+let terrainOff=false;   // set only if the elevation tiles are genuinely refused (bad key etc.)
+function setupTerrain(){
+  if(!CONFIG.TERRAIN||!HAS_KEY||terrainOff) return;
+  try{
+    if(!map.getStyle()) return;
+    if(!map.getSource('trail-dem')) map.addSource('trail-dem',{type:'raster-dem',url:'mapbox://mapbox.mapbox-terrain-dem-v1',tileSize:512,maxzoom:14});
+    if(!map.getTerrain()) map.setTerrain({source:'trail-dem',exaggeration:CONFIG.TERRAIN_EXAGGERATION});
+  }catch(err){ /* style not ready yet: the next event retries */ }
+}
+/* only switch 3D off if the elevation source is refused outright (key not allowed); a single failed tile must not kill it */
 map.on('error',e=>{
-  if(e&&e.sourceId==='trail-dem'){ console.warn('Elevation tiles failed, turning 3D terrain off:',e.error||e);
-    try{map.setTerrain(null);}catch(x){} }
+  if(e&&e.sourceId==='trail-dem'){
+    const st=e.error&&e.error.status;
+    console.warn('Elevation tile problem:',e.error||e);
+    if(st===401||st===403){ terrainOff=true; try{map.setTerrain(null);}catch(x){} }
+  }
 });
 map.on('style.load',()=>{ setupTerrain(); setupLayers(); });
-function applyMapData(){
-  if(!map.getSource('trail')||!T) return;
-  map.getSource('trail').setData(trailGeo);
-}
+['load','styledata','idle'].forEach(ev=>map.on(ev,()=>{ setupTerrain(); setupLayers(); }));   // safety net: keep trying until the trail is on the map
 let baseZoom=null;   // zoom level of the original "whole route" view
-const FIT_PAD=()=>window.innerWidth>820?CONFIG.FIT_PADDING:{top:70,bottom:260,left:50,right:50};   // keep the route clear of the glass panel
+const FIT_PAD=()=>window.innerWidth>820?CONFIG.FIT_PADDING:
+  {top:70,bottom:Math.round(document.querySelector('aside').getBoundingClientRect().height||260)+30,left:50,right:50};   // keep the route clear of the glass panel (on phones: the bottom sheet, whatever height it is)
 function fitAll(){
   const b=new mapboxgl.LngLatBounds();for(let i=0;i<T.n;i++)b.extend([T.lon[i],T.lat[i]]);
   const cam=map.cameraForBounds(b,{padding:FIT_PAD(),bearing:CONFIG.MAP_BEARING}); if(cam&&isFinite(cam.zoom)) baseZoom=cam.zoom;
@@ -531,7 +571,7 @@ function drawRibbonCore(){
     if(ov[k]<0.98){ const fe=Math.max(0,Math.min(1,ov[k]));
       rctx.beginPath(); rctx.moveTo(px[k]+fe*(qx[k]-px[k]),py[k]+fe*(qy[k]-py[k])); rctx.lineTo(qx[k],qy[k]);          // crisp end edge of the ribbon
       rctx.strokeStyle=SAPPHIRE_DEEP; rctx.lineWidth=1.5; rctx.stroke(); }
-    if(!dragging&&nearEnd!==end) continue;                                         // grip stays hidden unless the mouse is near it
+    if(!dragging&&nearEnd!==end&&!TOUCH) continue;                                 // grip stays hidden unless the mouse is near it (always shown on touch screens)
     rctx.beginPath(); rctx.moveTo(bar.x1,bar.y1); rctx.lineTo(bar.x2,bar.y2);
     rctx.strokeStyle='#fff'; rctx.lineWidth=gw+3; rctx.stroke();
     rctx.strokeStyle=active?'#5f6b80':'#9aa3b2'; rctx.lineWidth=gw; rctx.stroke();
@@ -557,7 +597,7 @@ function pointInRibbon(pt){
 }
 function hitRibbon(pt){
   if(!geom) return null;
-  for(const b of geom.bars||[]) if(distToSeg(pt.x,pt.y,b.x1,b.y1,b.x2,b.y2)<10) return {t:'handle',end:b.end};
+  for(const b of geom.bars||[]) if(distToSeg(pt.x,pt.y,b.x1,b.y1,b.x2,b.y2)<(TOUCH?22:10)) return {t:'handle',end:b.end};
   return pointInRibbon(pt)?{t:'body'}:null;
 }
 function ribbonIdxAt(pt){
@@ -568,7 +608,9 @@ function ribbonIdxAt(pt){
 function startDrag(pt){
   if(!T) return false; const h=hitRibbon(pt); if(!h) return false;
   drag={...h, ra0:ra, rb0:rb, anchor:h.t==='body'?nearestIdx(pt,(ra+rb)>>1):0};
-  map.getCanvas().style.cursor='grabbing'; return true;
+  map.getCanvas().style.cursor='grabbing';
+  if(h.t==='body') setCursor(ribbonIdxAt(pt));   // touch has no hover, so touching the ribbon also shows the value badge
+  return true;
 }
 function moveDrag(pt){
   if(drag.t==='handle'){
@@ -615,6 +657,14 @@ function updatePanel(){
   track.addEventListener('pointermove',e=>{ if(sd) slideTo(e.clientX-sd.x0); });
   const end=e=>{ if(!sd) return; sd=null; track.classList.remove('dragging'); try{track.releasePointerCapture(e.pointerId);}catch(x){} };
   track.addEventListener('pointerup',end); track.addEventListener('pointercancel',end);
+})();
+/* ---------- phone layout: keep map controls above the bottom sheet ---------- */
+(function(){
+  const aside=document.querySelector('aside');
+  const setH=()=>document.documentElement.style.setProperty('--panel-h',
+    (matchMedia('(max-width: 820px)').matches?Math.round(aside.getBoundingClientRect().height):0)+'px');
+  new ResizeObserver(setH).observe(aside); window.addEventListener('resize',setH);
+  setH();
 })();
 /* ---------- weather: free historical data from Open-Meteo (needs a date from the GPX timestamps, or CONFIG.WEATHER_DATE) ---------- */
 const WX_ICONS={
@@ -707,7 +757,7 @@ function buildTrack(){
   trailGeo=line(Array.from({length:T.n},(_,i)=>[T.lon[i],T.lat[i]]));
   startMk.setLngLat([T.lon[0],T.lat[0]]).addTo(map);
   endMk.setLngLat([T.lon[T.n-1],T.lat[T.n-1]]).addTo(map);
-  if(map.getSource('trail')) applyMapData(); else if(map.isStyleLoaded()) setupLayers();
+  setupLayers();
   ra=0; rb=Math.min(T.n-1,Math.max(MIN_RIBBON+1,idxOfDist(Math.min(CONFIG.RIBBON_START_M,T.total))));
   updateLegend(); updatePanel(); loadWeather();
   setCursor(0); sizeRibbon();
