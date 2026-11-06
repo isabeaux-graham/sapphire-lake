@@ -197,6 +197,7 @@ const CONFIG = {
   MAP_BEARING: 25,         // which compass direction points up: 0 = north up, 25 = a bit east of north, -25 = a bit west of north, 45 = north-east…
   FIT_PADDING: {top:140,bottom:40,left:120,right:360},   // space kept clear around the route when it's fitted. More top = route sits lower, more left = route sits further right
   WEATHER_DATE: '2026-10-31',        // optional: 'YYYY-MM-DD' or 'YYYY-MM-DD/YYYY-MM-DD' if your GPX has no timestamps (or to override them)
+  GRADE_CAP: 0.22,         // grade colour scale / legend is capped at ±this (0.22 = 22%); steeper bits are outliers and just show the end colour
   WEATHER_UNITS: 'metric', // 'imperial' (in, °F) or 'metric' (mm, °C)
   BADGE_GAP_PX: 6          // hover badge: gap between the ribbon's dot and the badge (raise it to move the badge further away)
 };
@@ -216,7 +217,7 @@ const BODY_FONT='"Telder","Jost",-apple-system,"Segoe UI",sans-serif';
 
 /* ---------- formatting (metric only) ---------- */
 const F = {
-  dist:m=>(m/1000).toFixed(2)+' km',
+  dist:m=>(m/1000).toFixed(1)+' km',
   ele: m=>Math.round(m).toLocaleString()+' m',
   grade:g=>(g>0?'+':'')+(g*100).toFixed(1)+'%'
 };
@@ -289,7 +290,7 @@ function ramp(name,t){
 }
 const rgbStr=c=>'rgb('+c.join(',')+')';
 function computeRanges(){
-  const gLo=Math.min(-0.01,Math.min(...T.grade)), gHi=Math.max(0.01,Math.max(...T.grade));   // the true steepest descent / ascent
+  const gLo=Math.max(-CONFIG.GRADE_CAP,Math.min(-0.01,Math.min(...T.grade))), gHi=Math.min(CONFIG.GRADE_CAP,Math.max(0.01,Math.max(...T.grade)));   // steepest descent / ascent, capped so outliers don't stretch the scale
   ranges={elevation:{lo:Math.min(...T.eleS),hi:Math.max(...T.eleS),fmt:F.ele,vals:T.eleS,t:null},
           grade:{lo:gLo,hi:gHi,fmt:F.grade,vals:T.grade,t:v=>v<0?0.5-0.5*v/gLo:0.5+0.5*v/gHi}};   // 0% stays the neutral middle colour even if the two ends differ
   const e=ranges.elevation; e.t=v=>(v-e.lo)/((e.hi-e.lo)||1);
