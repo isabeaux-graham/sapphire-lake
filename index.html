@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Sapphire Lake Trail</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Fallback fonts. "Amster" and "Telder" are used first if they're installed on the viewer's computer (or you add them with @font-face). -->
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700&family=PT+Serif:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.css" rel="stylesheet">
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.js"></script>
+<style>
+  :root{
+    --sapphire:#0a2f73; --sapphire-deep:#0a2f73; --sapphire-soft:#e8f0fc;
+    --bg:#f3f7fd; --panel:#ffffff; --ink:#14233f; --muted:#5f6f8c; --line:#d9e2f2;
+    --title-font:"Amster","PT Serif",Georgia,serif;                                   /* titles */
+    --body-font:"Telder","Jost",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; /* subtitles, labels, numbers */
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{font:15px/1.4 var(--body-font);
+    color:var(--ink);background:var(--bg);overflow:hidden}
+  .mapwrap{position:relative;height:100vh;width:100%;min-width:0}
+  #map{position:absolute;inset:0}
+  #ribbon{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}
+
+  /* floating stack of liquid-glass cards: each only as tall as its content, the map shows through */
+  aside{position:fixed;top:-4px;right:-4px;z-index:5;width:380px;max-height:100vh;overflow-y:auto;
+    padding:20px;display:flex;flex-direction:column;gap:12px;pointer-events:none;scrollbar-width:none}
+  aside::-webkit-scrollbar{display:none}
+  .card{pointer-events:auto;flex:none;padding:16px 20px 16px;border-radius:22px;
+    background:linear-gradient(135deg,rgba(255,255,255,.62),rgba(255,255,255,.34));
+    -webkit-backdrop-filter:blur(18px) saturate(170%);backdrop-filter:blur(18px) saturate(170%);
+    border:1px solid rgba(255,255,255,.65);
+    box-shadow:0 4px 14px rgba(10,47,115,.14),inset 0 1px 0 rgba(255,255,255,.8),inset 0 -1px 0 rgba(255,255,255,.25)}
+  .card h2:first-child{margin-top:0}
+  aside .sub,.legend-labels,.stat .l{color:#3f4f6e}
+  h1{font-family:var(--title-font);font-size:24px;margin:0 0 2px;text-transform:uppercase;letter-spacing:-.01em;color:var(--sapphire-deep);font-weight:700}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:6px}
+  h2{font-family:var(--title-font);font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--sapphire);margin:20px 0 8px;font-weight:700}
+
+  /* sapphire outline buttons -> filled when selected */
+  .seg{display:flex;gap:6px}
+  .seg button,.mini{border:1.5px solid var(--sapphire-deep);background:rgba(255,255,255,.45);color:var(--sapphire-deep);
+    font:inherit;font-size:13px;font-weight:550;border-radius:4px;cursor:pointer;padding:7px 8px;transition:background .12s,color .12s}
+  .seg button{flex:1}
+  .seg button:hover,.mini:hover{background:var(--sapphire-soft)}
+  .seg button.on{background:var(--sapphire-deep);color:#fff}
+  .mini{padding:5px 10px;font-size:12px}
+  .file input{display:none}
+  .drop{position:absolute;z-index:4;inset:0;display:none;align-items:center;justify-content:center;background:rgba(243,247,253,.88)}
+  .drop.show{display:flex}
+  .drop .card{background:#fff;border:2px dashed var(--sapphire);border-radius:16px;padding:28px 34px;text-align:center;max-width:380px;
+    box-shadow:0 4px 24px rgba(10,47,115,.18)}
+  .drop h3{margin:0 0 6px;color:var(--sapphire-deep);font-size:18px}
+  .drop p{margin:0 0 14px;color:var(--muted);font-size:13px}
+  .drop.over .card{background:var(--sapphire-soft)}
+
+  .legend{margin-top:10px}
+  .legend-bar{height:8px;border-radius:4px}
+  .legend-labels{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:3px}
+
+  .grid{display:flex;justify-content:space-between;gap:8px}
+  .stat{background:none;padding:0}
+  .stat .l{font-size:11px;color:var(--muted);margin-top:1px}
+  .stat .v{font-size:17px;font-weight:650;font-variant-numeric:tabular-nums;color:var(--sapphire-deep);letter-spacing:-.01em}
+  /* ribbon-span strip: faint line = whole trail, sapphire part = where the ribbon is */
+  .span{margin:2px 0 10px}
+  .span-track{position:relative;height:4px;border-radius:2px;background:rgba(10,47,115,.15)}
+  .span-fill{position:absolute;top:0;height:100%;border-radius:2px;background:var(--sapphire-deep);min-width:4px;cursor:grab;touch-action:none}
+  /* full-route line: same sapphire as the trail, always spans the whole width */
+  .span-track{cursor:pointer;touch-action:none}
+  .span-track.dragging,.span-track.dragging .span-fill{cursor:grabbing}
+  .span-fill::before{content:'';position:absolute;left:0;right:0;top:-9px;bottom:-9px}   /* bigger grab area than the thin bar */
+  .span-full{height:4px;border-radius:2px;background:var(--sapphire-deep)}
+  [hidden]{display:none!important}
+  .wdate{font-family:var(--body-font);text-transform:none;letter-spacing:0;font-weight:500;color:#3f4f6e;font-size:12px;margin-left:4px}
+  .wgrid{display:flex;justify-content:space-between;gap:8px}
+  .wgrid .stat .v{font-size:15px}
+  .wi{display:block;width:19px;height:19px;margin-bottom:3px;color:var(--sapphire-deep);fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .whead{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .wsrc{font-size:10px;color:#3f4f6e;text-align:right;white-space:nowrap;margin:0}
+  .dot{width:16px;height:16px;border-radius:50%;background:#fff;border:3px solid var(--sapphire);box-shadow:0 0 0 2px rgba(0,0,0,.3)}
+  .pin{width:12px;height:12px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 3px rgba(0,0,0,.5)}
+  @media (max-width: 820px){
+    .mapwrap{height:100vh}
+    aside{top:auto;bottom:-8px;right:-8px;left:-8px;width:auto;max-height:45vh}
+  }
+</style>
+</head>
+<body>
+<div class="mapwrap" id="mapwrap">
+  <div id="map"></div>
+  <canvas id="ribbon"></canvas>
+  <!-- only shown if the GPX can't be loaded automatically (e.g. page opened straight from disk) -->
+  <div class="drop" id="drop"><div class="card">
+    <h3>Load a GPX file</h3>
+    <p id="dropMsg">Drop a .gpx file anywhere on the map, or choose one.</p>
+    <label class="mini file">Choose GPX…<input type="file" id="gpxIn" accept=".gpx,application/gpx+xml,text/xml"></label>
+  </div></div>
+</div>
+
+<aside>
+  <div class="card">
+    <h1 id="title">Sapphire Lake</h1>
+    <!-- <div class="sub" id="subtitle">Elevation profile of a Trinity Alps hike</div> -->
+
+    <div class="seg" id="metricBtns">
+      <button data-m="elevation" class="on">Elevation</button>
+      <button data-m="grade">Grade</button>
+    </div>
+    <div class="legend">
+      <div class="legend-bar" id="legendBar"></div>
+      <div class="legend-labels"><span id="lgMin"></span><span id="lgMax"></span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 id="tripH">Entire Route</h2>
+    <div class="span"><div class="span-full"></div></div>
+    <div class="grid" id="tripStats"></div>
+  </div>
+
+  <div class="card">
+    <h2>Ribbon</h2>
+    <div class="span">
+      <div class="span-track"><div class="span-fill" id="spanFill"></div></div>
+    </div>
+    <div class="grid" id="segStats"></div>
+  </div>
+
+  <div class="card" id="weather" hidden>
+    <div class="whead">
+      <h2>Weather <span class="wdate" id="wDate"></span></h2>
+      <div class="wsrc">Source: Open-Meteo</div>
+    </div>
+    <div class="wgrid" id="wStats"></div>
+  </div>
+</aside>
+
+<!-- Optional: paste the full contents of your .gpx file between these tags and the page will load it without needing a server -->
+<script type="application/gpx+xml" id="gpxData"></script>
+
+<script>
+/* ================= CONFIG ================= */
+const CONFIG = {
+  MAPBOX_TOKEN: 'pk.eyJ1IjoiaXNhYmVhdXgiLCJhIjoiY213NTRsaDNoMDQyODJ6cHdnNTdsczFuaCJ9.xwgjkCc7mcsHdWLG_SZyJg',
+  STYLE: 'outdoors-v12',   // 'satellite-streets-v12' (satellite + labels), 'outdoors-v12', 'light-v11', 'streets-v12'
+  TERRAIN: true,           // real 3D mountains when you tilt the map
+  TERRAIN_EXAGGERATION: 1.5, // 1 = true scale; higher = more dramatic relief
+  GPX_URL: 'sapphire-lake.gpx',        // auto-loaded if it sits next to this file AND the page is served over http(s)
+                                       // (you can also add ?gpx=other.gpx to the page URL)
+  RIBBON_SIDE: 1,          //  1 = ribbon on the RIGHT of the direction of travel, -1 = on the left
+  RIBBON_OFFSET_PX: 14,    // gap between the trail and the foot of the ribbon
+  TILT_START: 3,           // map pitch (degrees) where the ribbon starts lifting off the ground…
+  TILT_FULL: 30,           // …and the pitch at which it stands fully upright
+  GRIP_LENGTH_PX: 20,      // grey drag bars at the ribbon's ends: how long they are…
+  GRIP_WIDTH_PX: 3,        // …and how thick
+  GRIP_NEAR_PX: 35,        // grips stay hidden until the mouse is within this many pixels of one
+  RIBBON_HIDE_ZOOM_OUT: 3, // ribbon hides once the map is zoomed out this many levels (button/scroll "clicks") past the fitted route view
+  RIBBON_START_M: 6000,    // how long the ribbon is when the page loads, in metres (you can still drag its ends afterwards)
+  TERRAIN_OCCLUSION: true, // in 3D, mountains in front of the ribbon hide it (it weaves in and out of view). false = ribbon always on top
+  OCCLUSION_SAMPLES: 90,   // how many points along the ribbon are checked for being hidden (higher = smoother edge, slower)
+  FOOT_LINE_PX: 1.2,       // thickness of the line along the BOTTOM of the elevation ribbon (next to the trail)
+  TOP_LINE_PX: 2.2,        // thickness of the line along the TOP of the ribbon
+  MAP_BEARING: 25,         // which compass direction points up: 0 = north up, 25 = a bit east of north, -25 = a bit west of north, 45 = north-east…
+  FIT_PADDING: {top:140,bottom:40,left:120,right:360},   // space kept clear around the route when it's fitted. More top = route sits lower, more left = route sits further right
+  WEATHER_DATE: '2026-10-31',        // optional: 'YYYY-MM-DD' or 'YYYY-MM-DD/YYYY-MM-DD' if your GPX has no timestamps (or to override them)
+  WEATHER_UNITS: 'metric', // 'imperial' (in, °F) or 'metric' (mm, °C)
+  BADGE_GAP_PX: 6          // hover badge: gap between the ribbon's dot and the badge (raise it to move the badge further away)
+};
+/* ======================================================= */
+
+(function(){
+const $ = s => document.querySelector(s);
+const HAS_KEY = CONFIG.MAPBOX_TOKEN && CONFIG.MAPBOX_TOKEN !== 'YOUR_MAPBOX_TOKEN';
+if(HAS_KEY) mapboxgl.accessToken=CONFIG.MAPBOX_TOKEN;
+const SAPPHIRE='#0a2f73', SAPPHIRE_DEEP='#0a2f73', MIN_RIBBON=15;
+let metric='elevation';
+let T=null, cursor=0, ra=0, rb=1, ranges={}, trailGeo=null;
+let hikeTimes={}, wxKey='';
+let rawName='Hike', rawPts=null, turnIdx=-1, geom=null, drag=null, hoverEnd=null, nearEnd=null;
+const BODY_FONT='"Telder","Jost",-apple-system,"Segoe UI",sans-serif';
+
+/* ---------- formatting (metric only) ---------- */
+const F = {
+  dist:m=>(m/1000).toFixed(2)+' km',
+  ele: m=>Math.round(m).toLocaleString()+' m',
+  grade:g=>(g>0?'+':'')+(g*100).toFixed(1)+'%'
+};
+
+/* ---------- track processing ---------- */
+function hav(a,b,c,d){const R=6371008.8,r=Math.PI/180,p=(c-a)*r,l=(d-b)*r;
+  const x=Math.sin(p/2)**2+Math.cos(a*r)*Math.cos(c*r)*Math.sin(l/2)**2;return 2*R*Math.asin(Math.sqrt(x));}
+function pct(arr,p){const s=Array.from(arr).sort((a,b)=>a-b);return s[Math.min(s.length-1,Math.max(0,Math.round(p*(s.length-1))))];}
+function processTrack(raw){
+  const n=raw.length, lat=new Float64Array(n), lon=new Float64Array(n), ele=new Float64Array(n);
+  const d=new Float64Array(n), eleS=new Float64Array(n), grade=new Float64Array(n);
+  const mx=new Float64Array(n), my=new Float64Array(n);   // web-mercator position, 0..1 (scaled to pixels at draw time)
+  raw.forEach((p,i)=>{
+    lat[i]=p[0];lon[i]=p[1];ele[i]=p[2];
+    const mc=mapboxgl.MercatorCoordinate.fromLngLat([p[1],p[0]]); mx[i]=mc.x; my[i]=mc.y;
+  });
+  for(let i=1;i<n;i++) d[i]=d[i-1]+hav(lat[i-1],lon[i-1],lat[i],lon[i]);
+  for(let i=0;i<n;i++){let s=0,c=0;for(let k=Math.max(0,i-2);k<=Math.min(n-1,i+2);k++){s+=ele[k];c++;}eleS[i]=s/c;}
+  let lo=0,hi=0;
+  for(let i=0;i<n;i++){
+    while(d[i]-d[lo]>40) lo++;
+    while(hi<n-1 && d[hi+1]-d[i]<=40) hi++;
+    const dd=d[hi]-d[lo]; grade[i]= dd>5 ? (eleS[hi]-eleS[lo])/dd : 0;
+  }
+  return {n,lat,lon,ele,eleS,d,grade,mx,my,total:d[n-1]};
+}
+function idxOfDist(dm){let lo=0,hi=T.n-1;while(lo<hi){const m=(lo+hi)>>1;if(T.d[m]<dm)lo=m+1;else hi=m;}return lo;}
+function stats(a,b){
+  let gain=0,mn=1e9,mx=-1e9,steep=T.grade[a],flat=T.grade[a];
+  for(let i=a;i<=b;i++){const e=T.eleS[i];if(e<mn)mn=e;if(e>mx)mx=e;
+    if(i>a){const x=e-T.eleS[i-1];if(x>0)gain+=x;}
+    const g=T.grade[i]; if(Math.abs(g)>Math.abs(steep))steep=g; if(Math.abs(g)<Math.abs(flat))flat=g;}   // steepest / least steep by magnitude (sign kept)
+  return {dist:T.d[b]-T.d[a],gain,mn,mx,steep,flat,avg:(T.eleS[b]-T.eleS[a])/Math.max(1,T.d[b]-T.d[a])};
+}
+/* out-and-back detection: end is near the start and the second half mirrors the first.
+   For an out-and-back we keep only the way out, so the ribbon stays on one side of the trail. */
+function findTurnaround(pts){
+  const n=pts.length; if(n<60) return -1;
+  const dEnd=hav(pts[0][0],pts[0][1],pts[n-1][0],pts[n-1][1]);
+  let c=0,best=0; for(let i=0;i<n;i++){const dd=hav(pts[0][0],pts[0][1],pts[i][0],pts[i][1]); if(dd>best){best=dd;c=i;}}
+  if(dEnd>Math.max(300,best*0.05)||best<500) return -1;
+  // refine around the farthest point: pick the index about which the two halves mirror each other best
+  let bk=-1,bs=1e18;
+  for(let k=Math.max(40,c-150);k<=Math.min(n-41,c+150);k++){
+    const J=Math.min(k,n-1-k,600), ds=[];
+    for(let j=40;j<=J;j+=10) ds.push(hav(pts[k-j][0],pts[k-j][1],pts[k+j][0],pts[k+j][1]));
+    if(ds.length<5) continue; ds.sort((a,b)=>a-b);
+    const med=ds[ds.length>>1]; if(med<bs){bs=med;bk=k;}
+  }
+  return bs<80 ? bk : -1;
+}
+
+/* ---------- color ramps ---------- */
+const RAMPS={
+  elevation:['#440154','#3b528b','#21918c','#5ec962','#fde725'],
+  grade:    ['#2166ac','#67a9cf','#f2f2f2','#ef8a62','#b2182b']
+};
+const hex2rgb=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16));
+function ramp(name,t){
+  t=Math.max(0,Math.min(1,t)); const st=RAMPS[name], x=t*(st.length-1), i=Math.min(st.length-2,Math.floor(x)), f=x-i;
+  const a=hex2rgb(st[i]), b=hex2rgb(st[i+1]); return a.map((v,k)=>Math.round(v+(b[k]-v)*f));
+}
+const rgbStr=c=>'rgb('+c.join(',')+')';
+function computeRanges(){
+  const gLo=Math.min(-0.01,Math.min(...T.grade)), gHi=Math.max(0.01,Math.max(...T.grade));   // the true steepest descent / ascent
+  ranges={elevation:{lo:Math.min(...T.eleS),hi:Math.max(...T.eleS),fmt:F.ele,vals:T.eleS,t:null},
+          grade:{lo:gLo,hi:gHi,fmt:F.grade,vals:T.grade,t:v=>v<0?0.5-0.5*v/gLo:0.5+0.5*v/gHi}};   // 0% stays the neutral middle colour even if the two ends differ
+  const e=ranges.elevation; e.t=v=>(v-e.lo)/((e.hi-e.lo)||1);
+}
+function buildSegColors(){
+  const r=ranges[metric]; T.segRGB=new Array(T.n-1);
+  for(let i=0;i<T.n-1;i++) T.segRGB[i]=ramp(metric,r.t((r.vals[i]+r.vals[i+1])/2));
+}
+/* ---------- map ---------- */
+function styleURL(id){
+  if(!HAS_KEY) return {version:8,sources:{osm:{type:'raster',tileSize:256,maxzoom:19,
+    tiles:['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],attribution:'© OpenStreetMap contributors'}},
+    layers:[{id:'osm',type:'raster',source:'osm'}]};
+  return `mapbox://styles/mapbox/${id}`;
+}
+const map=new mapboxgl.Map({container:'map',style:styleURL(CONFIG.STYLE),center:[-122.97,40.94],zoom:10,projection:'mercator'});
+map.addControl(new mapboxgl.NavigationControl({visualizePitch:true}),'top-left');
+map.addControl(new mapboxgl.ScaleControl({unit:'metric'}),'bottom-left');
+
+const cursorEl=document.createElement('div');cursorEl.className='dot';
+const cursorMk=new mapboxgl.Marker({element:cursorEl});
+const mkPin=c=>{const e=document.createElement('div');e.className='pin';e.style.background=c;return new mapboxgl.Marker({element:e});};
+const startMk=mkPin('#52ba0f'), endMk=mkPin('#ba0f52');
+const line=coords=>({type:'Feature',properties:{},geometry:{type:'LineString',coordinates:coords}});
+
+function setupLayers(){
+  if(!T||!trailGeo) return;
+  if(!map.getSource('trail')){
+    map.addSource('trail',{type:'geojson',data:trailGeo});
+    const cap={'line-cap':'round','line-join':'round'};
+    const firstLabel=(map.getStyle().layers.find(l=>l.type==='symbol')||{}).id;   // slot the trail just under the basemap's labels
+    map.addLayer({id:'trail',type:'line',source:'trail',layout:cap,paint:{'line-color':SAPPHIRE_DEEP,'line-width':4}},firstLabel);
+  }
+  applyMapData();
+}
+function setupTerrain(){
+  if(!CONFIG.TERRAIN||!HAS_KEY) return;
+  try{
+    if(!map.getSource('trail-dem')) map.addSource('trail-dem',{type:'raster-dem',url:'mapbox://mapbox.mapbox-terrain-dem-v1',tileSize:512,maxzoom:14});
+    map.setTerrain({source:'trail-dem',exaggeration:CONFIG.TERRAIN_EXAGGERATION});
+  }catch(err){ console.warn('3D terrain unavailable, using the flat map:',err); try{map.setTerrain(null);}catch(e){} }
+}
+/* if the elevation tiles can't be loaded (key not allowed, offline…) switch terrain off so the flat map still shows */
+map.on('error',e=>{
+  if(e&&e.sourceId==='trail-dem'){ console.warn('Elevation tiles failed, turning 3D terrain off:',e.error||e);
+    try{map.setTerrain(null);}catch(x){} }
+});
+map.on('style.load',()=>{ setupTerrain(); setupLayers(); });
+function applyMapData(){
+  if(!map.getSource('trail')||!T) return;
+  map.getSource('trail').setData(trailGeo);
+}
+let baseZoom=null;   // zoom level of the original "whole route" view
+const FIT_PAD=()=>window.innerWidth>820?CONFIG.FIT_PADDING:{top:70,bottom:260,left:50,right:50};   // keep the route clear of the glass panel
+function fitAll(){
+  const b=new mapboxgl.LngLatBounds();for(let i=0;i<T.n;i++)b.extend([T.lon[i],T.lat[i]]);
+  const cam=map.cameraForBounds(b,{padding:FIT_PAD(),bearing:CONFIG.MAP_BEARING}); if(cam&&isFinite(cam.zoom)) baseZoom=cam.zoom;
+  map.fitBounds(b,{padding:FIT_PAD(),bearing:CONFIG.MAP_BEARING,duration:600});
+}
+
+/* ---------- screen-space helpers ---------- */
+function distToSeg(px,py,ax,ay,bx,by){
+  const dx=bx-ax,dy=by-ay,L=dx*dx+dy*dy; let t=L?((px-ax)*dx+(py-ay)*dy)/L:0; t=Math.max(0,Math.min(1,t));
+  return Math.hypot(px-(ax+t*dx),py-(ay+t*dy));
+}
+/* nearest trail index to a screen point; a small penalty keeps it near `ref` so switchbacks don't make it jump */
+function nearestIdx(pt,ref){
+  let best=0,bc=1e18;
+  for(let j=0;j<T.n;j++){
+    const p=map.project([T.lon[j],T.lat[j]]), c=Math.hypot(p.x-pt.x,p.y-pt.y)+0.03*Math.abs(j-ref);
+    if(c<bc){bc=c;best=j;}
+  }
+  return best;
+}
+let mmPt=null, mmRaf=0;
+map.on('mousemove',e=>{
+  if(!T||drag) return; mmPt=e.point;
+  if(!mmRaf) mmRaf=requestAnimationFrame(()=>{mmRaf=0;onHover(mmPt);});
+});
+function onHover(pt){
+  const h=hitRibbon(pt);
+  const he=h&&h.t==='handle'?h.end:null;
+  let ne=null, nd=CONFIG.GRIP_NEAR_PX;                    // nearest grip within reach, if any
+  if(geom&&geom.bars) for(const b of geom.bars){
+    const d=distToSeg(pt.x,pt.y,b.x1,b.y1,b.x2,b.y2); if(d<nd){nd=d;ne=b.end;}
+  }
+  if(he!==hoverEnd||ne!==nearEnd){hoverEnd=he;nearEnd=ne;drawRibbon();}
+  if(h){
+    map.getCanvas().style.cursor='grab';
+    if(h.t==='body') setCursor(ribbonIdxAt(pt));
+    return;
+  }
+  const tol2=18*18, runs=[]; let cur=null;
+  for(let j=0;j<T.n;j++){
+    const p=map.project([T.lon[j],T.lat[j]]), dx=p.x-pt.x, dy=p.y-pt.y, d2=dx*dx+dy*dy;
+    if(d2<=tol2){
+      if(cur&&j-cur.last<=2){cur.last=j;if(d2<cur.d2){cur.d2=d2;cur.j=j;}}
+      else{cur={j,d2,last:j};runs.push(cur);}
+    }
+  }
+  map.getCanvas().style.cursor=runs.length?'crosshair':'';
+  if(!runs.length) return;
+  let best=runs[0]; for(const r of runs) if(Math.abs(r.j-cursor)<Math.abs(best.j-cursor)) best=r;
+  setCursor(best.j);
+}
+
+/* ---------- cursor ---------- */
+function setCursor(i){
+  cursor=Math.max(0,Math.min(T.n-1,Math.round(i)));
+  cursorMk.setLngLat([T.lon[cursor],T.lat[cursor]]).addTo(map);
+  drawRibbon();
+}
+
+/* ---------- ribbon window (ra..rb), changed by dragging on the map ---------- */
+function setRibbon(a,b){
+  const len=Math.max(MIN_RIBBON,b-a);
+  a=Math.max(0,Math.min(a,T.n-1-MIN_RIBBON)); b=Math.min(T.n-1,Math.max(b,a+MIN_RIBBON)); if(b-a<len&&b===T.n-1) a=Math.max(0,b-len);
+  ra=a; rb=b; updatePanel(); drawRibbon();
+}
+
+/* ---------- elevation ribbon (canvas over the map) ----------
+   The ribbon is a strip whose foot runs alongside the trail, offset to one side, and whose height shows elevation.
+   Flat map (pitch 0): it lies on the ground, extending sideways away from the trail.
+   Tilted map: it swings up and stands vertically on the ground, like a wall. */
+const rc=$('#ribbon'), rctx=rc.getContext('2d'), oc=document.createElement('canvas'), octx=oc.getContext('2d');
+let rW=0,rH=0;
+function sizeRibbon(){
+  const r=$('#mapwrap').getBoundingClientRect(), dpr=window.devicePixelRatio||1; rW=r.width; rH=r.height;
+  for(const [c,x] of [[rc,rctx],[oc,octx]]){c.width=rW*dpr;c.height=rH*dpr;x.setTransform(dpr,0,0,dpr,0,0);}
+  drawRibbon();
+}
+function halo(text,x,y,fill){
+  rctx.font='600 12px '+BODY_FONT;rctx.textAlign='center';rctx.textBaseline='middle';
+  rctx.lineWidth=3.5;rctx.strokeStyle='#fff';rctx.lineJoin='round';rctx.strokeText(text,x,y);rctx.fillStyle=fill;rctx.fillText(text,x,y);
+}
+const smooth01=t=>{t=Math.max(0,Math.min(1,t));return t*t*(3-2*t);};
+/* ---------- terrain occlusion for the ribbon (3D) ----------
+   For sampled points along the ribbon we cast a ray from the camera to the ribbon's foot and look at the
+   mountain terrain it passes over. f* = the fraction of the ribbon's height (measured up from its foot) that
+   is hidden behind terrain: 0 = all visible, 1 = all hidden. */
+let occKey='', occVals=null;
+function computeOcclusion(i0,m,fx,fy,hh,ws,up,mu){
+  const out=new Float32Array(m);
+  try{
+    const c=map.getCenter(), key=[c.lng.toFixed(5),c.lat.toFixed(5),map.getZoom().toFixed(3),map.getBearing().toFixed(2),map.getPitch().toFixed(2),i0,m,up.toFixed(3)].join('|');
+    if(key===occKey&&occVals&&occVals.length===m) return occVals;
+    if(typeof map.queryTerrainElevation!=='function') return out;
+    const cam=map.getFreeCameraOptions().position, cx=cam.x, cy=cam.y, zc=cam.toAltitude();
+    let incomplete=false;
+    const q=(x,y)=>{ const e=map.queryTerrainElevation(new mapboxgl.MercatorCoordinate(x,y,0).toLngLat()); if(e==null){incomplete=true;return null;} return e; };
+    const NS=Math.max(8,Math.min(m,CONFIG.OCCLUSION_SAMPLES|0)), NR=26, MARGIN=4;   // NR = points checked along each camera ray
+    const idx=[], val=[];
+    for(let j=0;j<NS;j++){
+      const k=Math.round(j*(m-1)/(NS-1)); idx.push(k);
+      const tx=fx[k], ty=fy[k], eg=q(tx,ty), H=hh[k]*up/(ws*mu);   // H = ribbon height in metres
+      let f=0;
+      if(eg!=null&&H>0){
+        for(let i=1;i<=NR;i++){
+          const sp=0.97*i/NR, e=q(cx+(tx-cx)*sp,cy+(ty-cy)*sp); if(e==null) continue;
+          const z0=zc+(eg-zc)*sp, need=(e+MARGIN-z0)/(H*sp);   // ribbon height fraction needed to clear this bit of terrain
+          if(need>f) f=need;
+        }
+      }
+      val.push(Math.min(2,f));
+    }
+    for(let j=0;j<NS-1;j++){
+      const k0=idx[j], k1=idx[j+1];
+      for(let k=k0;k<=k1;k++){ const t=k1>k0?(k-k0)/(k1-k0):0; out[k]=val[j]+(val[j+1]-val[j])*t; }
+    }
+    if(!incomplete){ occKey=key; occVals=out; } else { occKey=''; occVals=null; }   // elevation tiles still loading: don't cache
+  }catch(err){ if(!computeOcclusion.warned){computeOcclusion.warned=true;console.warn('Terrain occlusion skipped:',err);} }
+  return out;
+}
+function drawRibbon(){
+  try{ drawRibbonCore(); }
+  catch(err){ geom=null; if(!drawRibbon.warned){ drawRibbon.warned=true; console.error('Ribbon drawing failed:',err); } }
+}
+function drawRibbonCore(){
+  if(!T||!rW) return;
+  rctx.clearRect(0,0,rW,rH);
+  if(baseZoom!==null&&map.getZoom()<baseZoom-CONFIG.RIBBON_HIDE_ZOOM_OUT){geom=null;return;}   // zoomed far out: ribbon (and its grips/hit areas) disappear until we zoom back in
+  const i0=ra, m=rb-ra+1; if(m<3){geom=null;return;}
+  const ws=512*Math.pow(2,map.getZoom());                              // world size in pixels (Mapbox 512px tiles)
+  const g2s=(X,Y)=>map.project(new mapboxgl.MercatorCoordinate(X/ws,Y/ws,0).toLngLat());   // world pixels -> screen
+  const sinP=Math.sin(map.getPitch()*Math.PI/180);
+  const mu=mapboxgl.MercatorCoordinate.fromLngLat(map.getCenter()).meterInMercatorCoordinateUnits();   // mercator units per metre
+  const up=smooth01((map.getPitch()-CONFIG.TILT_START)/(CONFIG.TILT_FULL-CONFIG.TILT_START));   // 0 = lying flat, 1 = standing
+  const side=CONFIG.RIBBON_SIDE, off=CONFIG.RIBBON_OFFSET_PX;
+  const wx=new Float64Array(m), wy=new Float64Array(m);                 // trail in world pixels (independent of pitch/bearing)
+  const px=new Float64Array(m), py=new Float64Array(m), qx=new Float64Array(m), qy=new Float64Array(m);
+  const hh=new Float64Array(m), fx=new Float64Array(m), fy=new Float64Array(m);   // ribbon height (px) and foot position (mercator) per point
+  const ux=new Float64Array(m), uy=new Float64Array(m);                 // on-screen direction from ribbon foot to ribbon top
+  const nx=new Float64Array(m), ny=new Float64Array(m), tnx=new Float64Array(m), tny=new Float64Array(m);
+  let pathW=0, mn=1e9, mx=-1e9, jmn=0, jmx=0;
+  for(let k=0;k<m;k++){
+    wx[k]=T.mx[i0+k]*ws; wy[k]=T.my[i0+k]*ws;
+    if(k) pathW+=Math.hypot(wx[k]-wx[k-1],wy[k]-wy[k-1]);
+    const e=T.eleS[i0+k]; if(e<mn){mn=e;jmn=k;} if(e>mx){mx=e;jmx=k;}
+  }
+  /* ONE fixed vertical scale for every ribbon length: pixels per metre of elevation above the route's lowest point */
+  const gLo=ranges.elevation.lo, gRange=Math.max(ranges.elevation.hi-gLo,50);
+  const kPx=Math.min(200,rH*0.28)/gRange, minH=8;
+  const s=Math.max(3,Math.min(120,Math.ceil(60/Math.max(pathW/(m-1),0.01))));
+  /* sideways direction, computed on the ground (mercator x = east, y = south): "right of travel" is (-ty, tx) */
+  for(let k=0;k<m;k++){
+    const a=Math.max(0,k-s), b=Math.min(m-1,k+s);
+    let tx=wx[b]-wx[a], ty=wy[b]-wy[a]; const L=Math.hypot(tx,ty)||1; tx/=L; ty/=L;
+    tnx[k]=-side*ty; tny[k]=side*tx;
+  }
+  const sm=Math.max(2,Math.round(s/2));
+  for(let k=0;k<m;k++){
+    let ax=0,ay=0; for(let q=Math.max(0,k-sm);q<=Math.min(m-1,k+sm);q++){ax+=tnx[q];ay+=tny[q];}
+    const L=Math.hypot(ax,ay)||1; nx[k]=ax/L; ny[k]=ay/L;
+    const h=minH+(T.eleS[i0+k]-gLo)*kPx;                     // ribbon height, in pixels
+    const bx=wx[k]+nx[k]*off, by=wy[k]+ny[k]*off;             // foot of the ribbon, offset from the trail
+    hh[k]=h; fx[k]=bx/ws; fy[k]=by/ws;
+    const b=g2s(bx,by);                                           // foot (map.project follows the 3D terrain automatically)
+    const t0=g2s(bx+nx[k]*h*(1-up),by+ny[k]*h*(1-up));           // top when flat: sideways
+    const t={x:t0.x,y:t0.y-h*up*sinP};                           // top when tilted: straight up the screen
+    px[k]=b.x; py[k]=b.y; qx[k]=t.x; qy[k]=t.y;
+    const dx=qx[k]-px[k], dy=qy[k]-py[k], dl=Math.hypot(dx,dy);
+    if(dl>1){ux[k]=dx/dl;uy[k]=dy/dl;} else {ux[k]=0;uy[k]=-1;}
+  }
+  const step=Math.max(1,Math.ceil(m/700));
+  /* ov[k]: 0 = column fully visible, 1 = fully hidden, in between = the lower part is hidden behind a mountain */
+  const ov=(CONFIG.TERRAIN_OCCLUSION&&up>0.05&&map.getTerrain&&map.getTerrain())?computeOcclusion(i0,m,fx,fy,hh,ws,up,mu):new Float32Array(m);
+  geom={i0,m,px,py,qx,qy,step};
+  octx.clearRect(0,0,rW,rH); octx.lineWidth=1; octx.lineJoin='round';
+  const ks=[]; for(let k=0;k<m-1;k+=step) ks.push(k);
+  if(up>0.05) ks.sort((a,b)=>(py[a]+py[Math.min(m-1,a+step)])-(py[b]+py[Math.min(m-1,b+step)]));  // paint far parts first when tilted
+  for(const k of ks){
+    const k2=Math.min(m-1,k+step), col=rgbStr(T.segRGB[i0+k]);
+    const fa=Math.min(1,ov[k]), fb=Math.min(1,ov[k2]); if(fa>=1&&fb>=1) continue;   // fully hidden behind terrain
+    octx.fillStyle=col; octx.strokeStyle=col;
+    octx.beginPath(); octx.moveTo(px[k]+fa*(qx[k]-px[k]),py[k]+fa*(qy[k]-py[k])); octx.lineTo(px[k2]+fb*(qx[k2]-px[k2]),py[k2]+fb*(qy[k2]-py[k2])); octx.lineTo(qx[k2],qy[k2]); octx.lineTo(qx[k],qy[k]); octx.closePath();
+    octx.fill(); octx.stroke();
+  }
+  rctx.globalAlpha=0.88; rctx.drawImage(oc,0,0,rW,rH); rctx.globalAlpha=1;
+  rctx.lineJoin='round'; rctx.lineCap='round';
+  const path=(X,Y,ok)=>{   // polyline that skips the stretches where ok(k) is false (hidden by terrain)
+    rctx.beginPath(); let pen=false;
+    const at=k=>{ if(ok(k)){ pen?rctx.lineTo(X[k],Y[k]):rctx.moveTo(X[k],Y[k]); pen=true; } else pen=false; };
+    for(let k=0;k<m-1;k+=step) at(k); at(m-1);
+  };
+  const footOK=k=>ov[k]<=0.02, topOK=k=>ov[k]<0.98;
+  path(px,py,footOK); rctx.strokeStyle='rgba(255,255,255,.9)'; rctx.lineWidth=CONFIG.FOOT_LINE_PX+2.3; rctx.stroke();          // foot line
+  rctx.strokeStyle=SAPPHIRE_DEEP; rctx.lineWidth=CONFIG.FOOT_LINE_PX; rctx.stroke();
+  path(qx,qy,topOK); rctx.strokeStyle='#fff'; rctx.lineWidth=CONFIG.TOP_LINE_PX+2.8; rctx.stroke();                              // top edge
+  rctx.strokeStyle=SAPPHIRE_DEEP; rctx.lineWidth=CONFIG.TOP_LINE_PX; rctx.stroke();
+  const kc=cursor-i0;
+  if(kc>=0&&kc<m&&ov[kc]<0.98){
+    const fc=Math.max(0,Math.min(1,ov[kc])), sx=px[kc]+fc*(qx[kc]-px[kc]), sy=py[kc]+fc*(qy[kc]-py[kc]);   // visible start of this column
+    if(fc<=0.02){
+      const tp=map.project([T.lon[cursor],T.lat[cursor]]);                       // little link from the trail dot to the ribbon's foot
+      rctx.beginPath(); rctx.moveTo(tp.x,tp.y); rctx.lineTo(px[kc],py[kc]);
+      rctx.strokeStyle='#fff'; rctx.lineWidth=4; rctx.stroke(); rctx.strokeStyle=SAPPHIRE; rctx.lineWidth=1.5; rctx.stroke();
+    }
+    rctx.beginPath(); rctx.moveTo(sx,sy); rctx.lineTo(qx[kc],qy[kc]);
+    rctx.strokeStyle='#fff'; rctx.lineWidth=5; rctx.stroke(); rctx.strokeStyle=SAPPHIRE; rctx.lineWidth=2.5; rctx.stroke();
+    const txt=metric==='grade'?F.grade(T.grade[cursor]):F.ele(T.eleS[cursor]);   // badge follows the colour mode
+    rctx.font='600 14px '+BODY_FONT;
+    const w=rctx.measureText(txt).width+16, bh=22;
+    const reach=Math.abs(ux[kc])*w/2+Math.abs(uy[kc])*bh/2;           // how far the badge extends back toward the dot
+    const bd=9+CONFIG.BADGE_GAP_PX+reach, bx=qx[kc]+ux[kc]*bd, by=qy[kc]+uy[kc]*bd;   // 9 = dot radius; badge sits just beyond it
+    rctx.beginPath(); rctx.roundRect(bx-w/2,by-bh/2,w,bh,3); rctx.fillStyle=SAPPHIRE; rctx.fill();
+    rctx.fillStyle='#fff'; rctx.textAlign='center'; rctx.textBaseline='middle'; rctx.fillText(txt,bx,by+0.5);
+  }
+  /* small grey grab bars at both ends of the ribbon: drag one to extend or shrink the ribbon */
+  const bars=[], hl=CONFIG.GRIP_LENGTH_PX/2, gw=CONFIG.GRIP_WIDTH_PX;
+  for(const [end,k] of [['a',0],['b',m-1]]){
+    const cx=(px[k]+qx[k])/2, cy=(py[k]+qy[k])/2;
+    const bar={end,x1:cx-ux[k]*hl,y1:cy-uy[k]*hl,x2:cx+ux[k]*hl,y2:cy+uy[k]*hl};
+    bars.push(bar);
+    const dragging=drag&&drag.t==='handle'&&drag.end===end;
+    const active=(drag&&drag.t==='handle'?drag.end:hoverEnd)===end;
+    if(ov[k]<0.98){ const fe=Math.max(0,Math.min(1,ov[k]));
+      rctx.beginPath(); rctx.moveTo(px[k]+fe*(qx[k]-px[k]),py[k]+fe*(qy[k]-py[k])); rctx.lineTo(qx[k],qy[k]);          // crisp end edge of the ribbon
+      rctx.strokeStyle=SAPPHIRE_DEEP; rctx.lineWidth=1.5; rctx.stroke(); }
+    if(!dragging&&nearEnd!==end) continue;                                         // grip stays hidden unless the mouse is near it
+    rctx.beginPath(); rctx.moveTo(bar.x1,bar.y1); rctx.lineTo(bar.x2,bar.y2);
+    rctx.strokeStyle='#fff'; rctx.lineWidth=gw+3; rctx.stroke();
+    rctx.strokeStyle=active?'#5f6b80':'#9aa3b2'; rctx.lineWidth=gw; rctx.stroke();
+  }
+  geom.bars=bars;
+}
+map.getContainer().addEventListener('mouseleave',()=>{ if(nearEnd||hoverEnd){nearEnd=null;hoverEnd=null;drawRibbon();} });
+map.on('render',drawRibbon);
+if(document.fonts&&document.fonts.ready) document.fonts.ready.then(()=>drawRibbon());
+new ResizeObserver(()=>{map.resize();sizeRibbon();}).observe($('#mapwrap'));
+
+/* ---------- ribbon hit-testing + dragging ---------- */
+function pointInRibbon(pt){
+  const {m,px,py,qx,qy,step}=geom, poly=[];
+  for(let k=0;k<m;k+=step) poly.push([px[k],py[k]]); poly.push([px[m-1],py[m-1]]);
+  for(let k=m-1;k>=0;k-=step) poly.push([qx[k],qy[k]]); poly.push([qx[0],qy[0]]);
+  let inside=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const [xi,yi]=poly[i],[xj,yj]=poly[j];
+    if(((yi>pt.y)!==(yj>pt.y))&&(pt.x<(xj-xi)*(pt.y-yi)/(yj-yi)+xi)) inside=!inside;
+  }
+  return inside;
+}
+function hitRibbon(pt){
+  if(!geom) return null;
+  for(const b of geom.bars||[]) if(distToSeg(pt.x,pt.y,b.x1,b.y1,b.x2,b.y2)<10) return {t:'handle',end:b.end};
+  return pointInRibbon(pt)?{t:'body'}:null;
+}
+function ribbonIdxAt(pt){
+  const {i0,m,px,py,qx,qy}=geom; let best=0,bd=1e18;
+  for(let k=0;k<m;k++){const d=distToSeg(pt.x,pt.y,px[k],py[k],qx[k],qy[k]); if(d<bd){bd=d;best=k;}}
+  return i0+best;
+}
+function startDrag(pt){
+  if(!T) return false; const h=hitRibbon(pt); if(!h) return false;
+  drag={...h, ra0:ra, rb0:rb, anchor:h.t==='body'?nearestIdx(pt,(ra+rb)>>1):0};
+  map.getCanvas().style.cursor='grabbing'; return true;
+}
+function moveDrag(pt){
+  if(drag.t==='handle'){
+    const ref=drag.end==='a'?ra:rb, idx=nearestIdx(pt,ref);
+    if(drag.end==='a') setRibbon(Math.min(idx,rb-MIN_RIBBON),rb); else setRibbon(ra,Math.max(idx,ra+MIN_RIBBON));
+  } else {
+    const idx=nearestIdx(pt,drag.anchor+(ra-drag.ra0)); let delta=idx-drag.anchor;
+    delta=Math.max(-drag.ra0,Math.min(T.n-1-drag.rb0,delta)); setRibbon(drag.ra0+delta,drag.rb0+delta);
+  }
+}
+function endDrag(){ if(!drag) return; drag=null; map.getCanvas().style.cursor=''; }
+const mapPt=(cx,cy)=>{const r=map.getCanvas().getBoundingClientRect();return {x:cx-r.left,y:cy-r.top};};
+map.on('mousedown',e=>{ if(startDrag(e.point)) e.preventDefault(); });
+window.addEventListener('mousemove',e=>{ if(drag) moveDrag(mapPt(e.clientX,e.clientY)); });
+window.addEventListener('mouseup',endDrag);
+map.on('touchstart',e=>{ if(e.points&&e.points.length>1) return; if(startDrag(e.point)) e.preventDefault(); });
+window.addEventListener('touchmove',e=>{ if(drag){ e.preventDefault(); const t=e.touches[0]; moveDrag(mapPt(t.clientX,t.clientY)); } },{passive:false});
+window.addEventListener('touchend',endDrag);
+
+/* ---------- panel ---------- */
+function statGrid(s){
+  const c=(l,v)=>`<div class="stat"><div class="v">${v}</div><div class="l">${l}</div></div>`;
+  return c('Distance',F.dist(s.dist))+c('Vert','+'+F.ele(s.gain))+c('Avg grade',F.grade(s.avg));
+}
+function updatePanel(){
+  $('#tripStats').innerHTML=statGrid(stats(0,T.n-1)); $('#segStats').innerHTML=statGrid(stats(ra,rb));
+  const tot=T.total||1, f=$('#spanFill');
+  f.style.left=(T.d[ra]/tot*100)+'%'; f.style.width=((T.d[rb]-T.d[ra])/tot*100)+'%';
+}
+/* ---------- drag the blue bar in the Ribbon card to slide the ribbon along the trail ---------- */
+(function(){
+  const track=document.querySelector('.span-track'), fill=$('#spanFill'); let sd=null;
+  const slideTo=(dx)=>{   // move the ribbon by dx pixels of bar, keeping its length
+    const dd=dx/sd.w*T.total, a=idxOfDist(Math.max(0,Math.min(T.total,T.d[sd.ra0]+dd)));
+    const delta=Math.max(-sd.ra0,Math.min(T.n-1-sd.rb0,a-sd.ra0)); setRibbon(sd.ra0+delta,sd.rb0+delta);
+  };
+  track.addEventListener('pointerdown',e=>{
+    if(!T) return; const r=track.getBoundingClientRect(); sd={x0:e.clientX,w:r.width||1,ra0:ra,rb0:rb};
+    if(!fill.contains(e.target)){   // clicked the empty track: centre the ribbon there first, then keep dragging
+      const dist=(e.clientX-r.left)/r.width*T.total, mid=(T.d[ra]+T.d[rb])/2; sd.x0=e.clientX; slideTo((dist-mid)/T.total*sd.w); sd.ra0=ra; sd.rb0=rb;
+    }
+    track.setPointerCapture(e.pointerId); track.classList.add('dragging'); e.preventDefault();
+  });
+  track.addEventListener('pointermove',e=>{ if(sd) slideTo(e.clientX-sd.x0); });
+  const end=e=>{ if(!sd) return; sd=null; track.classList.remove('dragging'); try{track.releasePointerCapture(e.pointerId);}catch(x){} };
+  track.addEventListener('pointerup',end); track.addEventListener('pointercancel',end);
+})();
+/* ---------- weather: free historical data from Open-Meteo (needs a date from the GPX timestamps, or CONFIG.WEATHER_DATE) ---------- */
+const WX_ICONS={
+  sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  rain:'<path d="M12 3c3 4 6 7 6 10a6 6 0 0 1-12 0c0-3 3-6 6-10z"/>',
+  snow:'<path d="M6.5 14.5A4 4 0 0 1 7 6.6a5.5 5.5 0 0 1 10.6 1.5A3.5 3.5 0 0 1 17.5 14.5z"/><path d="M8 18.5h.01M12 20.5h.01M16 18.5h.01" stroke-width="2.6"/>',
+  temp:'<path d="M10 14V5a2 2 0 0 1 4 0v9a4 4 0 1 1-4 0z"/>'
+};
+async function loadWeather(){
+  const box=$('#weather'); box.hidden=true;
+  try{
+    let d0,d1;
+    if(CONFIG.WEATHER_DATE){ [d0,d1]=CONFIG.WEATHER_DATE.split('/'); d1=d1||d0; }
+    else if(hikeTimes.t0){
+      const lon0=T.lon[0], loc=t=>new Date(t+lon0/15*3600e3).toISOString().slice(0,10);   // rough local date from longitude
+      d0=loc(hikeTimes.t0); d1=loc(hikeTimes.t1);
+    } else return;
+    const imp=CONFIG.WEATHER_UNITS!=='metric';
+    const lat=T.lat[T.n>>1], lon=T.lon[T.n>>1], el=Math.round(T.eleS.reduce((a,b)=>a+b,0)/T.n);
+    const key=[d0,d1,lat.toFixed(2),lon.toFixed(2),imp].join('|'); if(key===wxKey) { box.hidden=false; return; }
+    const url='https://archive-api.open-meteo.com/v1/archive?latitude='+lat.toFixed(4)+'&longitude='+lon.toFixed(4)+
+      '&start_date='+d0+'&end_date='+d1+'&elevation='+el+'&timezone=auto'+
+      '&daily=temperature_2m_max,temperature_2m_min,rain_sum,snowfall_sum,sunshine_duration'+
+      (imp?'&temperature_unit=fahrenheit&precipitation_unit=inch':'');
+    const r=await fetch(url); if(!r.ok) return; const w=(await r.json()).daily; if(!w||!w.time||!w.time.length) return;
+    const sum=a=>a.reduce((x,y)=>x+(y||0),0), clean=a=>a.filter(v=>v!=null);
+    const sunH=sum(w.sunshine_duration)/3600, rain=sum(w.rain_sum), snow=sum(w.snowfall_sum);
+    const hi=Math.max(...clean(w.temperature_2m_max)), lo=Math.min(...clean(w.temperature_2m_min));
+    const ico=n=>'<svg class="wi" viewBox="0 0 24 24">'+WX_ICONS[n]+'</svg>';
+    const c=(i,v,l)=>'<div class="stat">'+ico(i)+'<div class="v">'+v+'</div><div class="l">'+l+'</div></div>';
+    $('#wStats').innerHTML=
+      c('sun',sunH.toFixed(1)+' h','Sunshine')+
+      c('rain',rain.toFixed(imp?2:0)+(imp?' in':' mm'),'Rain')+
+      c('snow',snow.toFixed(1)+(imp?' in':' cm'),'Snow')+
+      c('temp',Math.round(hi)+'°/'+Math.round(lo)+'°','High / low');
+    const fm=d=>new Date(d+'T12:00:00Z').toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'});
+    $('#wDate').textContent=d0===d1?fm(d0):fm(d0)+' – '+fm(d1);
+    wxKey=key; box.hidden=false;
+  }catch(e){ /* offline or no data: leave the weather section hidden */ }
+}
+function updateLegend(){
+  const r=ranges[metric], st=[]; for(let k=0;k<=20;k++) st.push(rgbStr(ramp(metric,r.t(r.lo+(k/20)*(r.hi-r.lo))))+' '+(k*5)+'%');
+  $('#legendBar').style.background='linear-gradient(90deg,'+st.join(',')+')';
+  $('#lgMin').textContent=r.fmt(r.lo); $('#lgMax').textContent=r.fmt(r.hi);
+}
+$('#metricBtns').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b||!T) return; metric=b.dataset.m;
+  document.querySelectorAll('#metricBtns button').forEach(x=>x.classList.toggle('on',x===b));
+  buildSegColors(); updateLegend(); updatePanel(); drawRibbon();
+});
+
+/* ---------- GPX loading (fetched next to the page; file picker / drop only as a fallback) ---------- */
+function parseGPX(text,fallbackName){
+  const doc=new DOMParser().parseFromString(text,'application/xml');
+  if(doc.getElementsByTagName('parsererror').length) throw new Error('That file isn’t valid GPX/XML');
+  let nodes=[...doc.getElementsByTagName('trkpt')];
+  if(!nodes.length) nodes=[...doc.getElementsByTagName('rtept')];
+  if(nodes.length<2) throw new Error('No track or route points found in that file');
+  const pts=nodes.map(n=>{const e=n.getElementsByTagName('ele')[0];
+    return [parseFloat(n.getAttribute('lat')),parseFloat(n.getAttribute('lon')),e?parseFloat(e.textContent):0];
+  }).filter(p=>isFinite(p[0])&&isFinite(p[1]));
+  const ts=nodes.map(n=>{const e=n.getElementsByTagName('time')[0];return e?Date.parse(e.textContent):NaN;}).filter(isFinite);
+  hikeTimes=ts.length?{t0:ts[0],t1:ts[ts.length-1]}:{};
+  const nm=doc.getElementsByTagName('name')[0]||doc.getElementsByTagName('n')[0];
+  return {name:(nm&&nm.textContent.trim())||fallbackName||'Hike',pts};
+}
+async function loadFile(f){
+  try{ safeSet(parseGPX(await f.text(),f.name.replace(/\.gpx$/i,''))); }
+  catch(err){ showDrop(err.message); }
+}
+function safeSet(g){   // the GPX was read fine; if building the map from it fails, say so instead of pretending the file is missing
+  try{ setRaw(g.name,g.pts); }
+  catch(err){ console.error('Building the route failed:',err); showDrop('The GPX loaded, but the page hit an error drawing it: '+(err&&err.message||err)); }
+}
+$('#gpxIn').addEventListener('change',e=>{const f=e.target.files[0]; if(f) loadFile(f); e.target.value='';});
+const wrap=$('#mapwrap');
+['dragenter','dragover'].forEach(ev=>wrap.addEventListener(ev,e=>{if(T) return; e.preventDefault();$('#drop').classList.add('show','over');}));
+['dragleave','drop'].forEach(ev=>wrap.addEventListener(ev,e=>{if(T) return; e.preventDefault();$('#drop').classList.remove('over');}));
+wrap.addEventListener('drop',e=>{if(T) return; const f=e.dataTransfer.files[0]; if(f) loadFile(f);});
+function showDrop(msg){ $('#dropMsg').textContent=msg||'Drop a .gpx file anywhere on the map, or choose one.'; $('#drop').classList.add('show'); }
+
+function setRaw(name,pts){
+  rawName=name; rawPts=pts; turnIdx=findTurnaround(pts);
+  buildTrack();
+}
+function buildTrack(){
+  const trim=turnIdx>0;    // out-and-back: use only the way out so the ribbon stays on one side of the trail
+  T=processTrack(trim?rawPts.slice(0,turnIdx+1):rawPts);
+  computeRanges(); buildSegColors();
+  trailGeo=line(Array.from({length:T.n},(_,i)=>[T.lon[i],T.lat[i]]));
+  startMk.setLngLat([T.lon[0],T.lat[0]]).addTo(map);
+  endMk.setLngLat([T.lon[T.n-1],T.lat[T.n-1]]).addTo(map);
+  if(map.getSource('trail')) applyMapData(); else if(map.isStyleLoaded()) setupLayers();
+  ra=0; rb=Math.min(T.n-1,Math.max(MIN_RIBBON+1,idxOfDist(Math.min(CONFIG.RIBBON_START_M,T.total))));
+  updateLegend(); updatePanel(); loadWeather();
+  setCursor(0); sizeRibbon();
+  $('#drop').classList.remove('show');
+  fitAll();
+}
+
+(async function init(){
+  /* 1) GPX pasted straight into the page (works even when opened from disk) */
+  const emb=document.getElementById('gpxData');
+  if(emb&&emb.textContent.trim()){
+    let g=null; try{ g=parseGPX(emb.textContent.trim(),'Hike'); }catch(e){ console.error(e); }
+    if(g){ safeSet(g); return; }
+  }
+  /* 2) browsers won't let a page opened from disk (file://) read files next to it */
+  if(location.protocol==='file:'){
+    showDrop('This page was opened from disk, so the browser blocks it from reading the GPX next to it. Choose the file here, or open the page through a local server.');
+    return;
+  }
+  /* 3) fetch the GPX from the same folder: ?gpx=…, then CONFIG.GPX_URL, then a .gpx named like this page */
+  const page=location.pathname.split('/').pop().replace(/\.html?$/i,'');
+  const tries=[new URLSearchParams(location.search).get('gpx'),CONFIG.GPX_URL,page?page+'.gpx':null]
+    .filter((u,i,a)=>u&&a.indexOf(u)===i);
+  for(const url of tries){
+    let g=null;
+    try{
+      const r=await fetch(url); if(!r.ok) continue;
+      g=parseGPX(await r.text(),url.split('/').pop().replace(/\.gpx$/i,''));
+    }catch(e){ console.error('GPX fetch/parse failed for',url,e); continue; }
+    safeSet(g); return;
+  }
+  showDrop('Couldn’t find '+tries.join(' or ')+' next to this page. Check the file name, or choose the file here.');
+})();
+})();
+</script>
+</body>
+</html>
