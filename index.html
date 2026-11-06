@@ -244,6 +244,14 @@ function processTrack(raw){
   return {n,lat,lon,ele,eleS,d,grade,mx,my,total:d[n-1]};
 }
 function idxOfDist(dm){let lo=0,hi=T.n-1;while(lo<hi){const m=(lo+hi)>>1;if(T.d[m]<dm)lo=m+1;else hi=m;}return lo;}
+/* index closest to a distance along the trail */
+function nearIdxOfDist(dm){const i=idxOfDist(Math.max(0,Math.min(T.total,dm)));return (i>0&&dm-T.d[i-1]<T.d[i]-dm)?i-1:i;}
+/* put the ribbon's start at d0 metres, keeping its length in METRES (not in points, which are unevenly spaced) */
+function slideRibbonTo(d0,L,ra0){
+  d0=Math.max(0,Math.min(T.total-L,d0));
+  const a=nearIdxOfDist(d0), b=nearIdxOfDist(d0+L);
+  setRibbon(a,Math.max(b,a+MIN_RIBBON));
+}
 function stats(a,b){
   let gain=0,mn=1e9,mx=-1e9,steep=T.grade[a],flat=T.grade[a];
   for(let i=a;i<=b;i++){const e=T.eleS[i];if(e<mn)mn=e;if(e>mx)mx=e;
@@ -617,8 +625,8 @@ function moveDrag(pt){
     const ref=drag.end==='a'?ra:rb, idx=nearestIdx(pt,ref);
     if(drag.end==='a') setRibbon(Math.min(idx,rb-MIN_RIBBON),rb); else setRibbon(ra,Math.max(idx,ra+MIN_RIBBON));
   } else {
-    const idx=nearestIdx(pt,drag.anchor+(ra-drag.ra0)); let delta=idx-drag.anchor;
-    delta=Math.max(-drag.ra0,Math.min(T.n-1-drag.rb0,delta)); setRibbon(drag.ra0+delta,drag.rb0+delta);
+    const idx=nearestIdx(pt,drag.anchor+(ra-drag.ra0));
+    slideRibbonTo(T.d[drag.ra0]+(T.d[idx]-T.d[drag.anchor]),T.d[drag.rb0]-T.d[drag.ra0]);
   }
 }
 function endDrag(){ if(!drag) return; drag=null; map.getCanvas().style.cursor=''; }
@@ -643,19 +651,29 @@ function updatePanel(){
 /* ---------- drag the blue bar in the Ribbon card to slide the ribbon along the trail ---------- */
 (function(){
   const track=document.querySelector('.span-track'), fill=$('#spanFill'); let sd=null;
+  const PRESETS=[1000,5000,10000,Infinity];   // a plain click on the bar cycles the ribbon through these lengths (metres); Infinity = the full trail
+  const cycleLength=()=>{
+    const cur=T.d[rb]-T.d[ra], len=L=>Math.min(T.total,L);
+    const i=PRESETS.findIndex(L=>Math.abs(cur-len(L))<=Math.max(150,len(L)*0.08));
+    let j=cur>=T.total*0.98?0:(i+1)%PRESETS.length;   // already showing the full trail -> back to 1 km
+                                    // not on a preset yet -> start at 1 km
+    while(j!==0&&j!==i&&len(PRESETS[j])<=cur+150&&len(PRESETS[j])<T.total) j=(j+1)%PRESETS.length;   // skip presets that wouldn't change anything on short trails
+    const L=len(PRESETS[j]);
+    const mid=(T.d[ra]+T.d[rb])/2, d0=Math.max(0,Math.min(T.total-L,mid-L/2));   // keep the ribbon centred where it was
+    setRibbon(nearIdxOfDist(d0),nearIdxOfDist(d0+L));
+  };
   const slideTo=(dx)=>{   // move the ribbon by dx pixels of bar, keeping its length
-    const dd=dx/sd.w*T.total, a=idxOfDist(Math.max(0,Math.min(T.total,T.d[sd.ra0]+dd)));
-    const delta=Math.max(-sd.ra0,Math.min(T.n-1-sd.rb0,a-sd.ra0)); setRibbon(sd.ra0+delta,sd.rb0+delta);
+    const dd=dx/sd.w*T.total; slideRibbonTo(T.d[sd.ra0]+dd,T.d[sd.rb0]-T.d[sd.ra0]);
   };
   track.addEventListener('pointerdown',e=>{
-    if(!T) return; const r=track.getBoundingClientRect(); sd={x0:e.clientX,w:r.width||1,ra0:ra,rb0:rb};
+    if(!T) return; const r=track.getBoundingClientRect(); sd={x0:e.clientX,w:r.width||1,ra0:ra,rb0:rb,onFill:fill.contains(e.target),moved:false};
     if(!fill.contains(e.target)){   // clicked the empty track: centre the ribbon there first, then keep dragging
       const dist=(e.clientX-r.left)/r.width*T.total, mid=(T.d[ra]+T.d[rb])/2; sd.x0=e.clientX; slideTo((dist-mid)/T.total*sd.w); sd.ra0=ra; sd.rb0=rb;
     }
     track.setPointerCapture(e.pointerId); track.classList.add('dragging'); e.preventDefault();
   });
-  track.addEventListener('pointermove',e=>{ if(sd) slideTo(e.clientX-sd.x0); });
-  const end=e=>{ if(!sd) return; sd=null; track.classList.remove('dragging'); try{track.releasePointerCapture(e.pointerId);}catch(x){} };
+  track.addEventListener('pointermove',e=>{ if(!sd) return; if(Math.abs(e.clientX-sd.x0)>4) sd.moved=true; slideTo(e.clientX-sd.x0); });
+  const end=e=>{ if(!sd) return; const click=sd.onFill&&!sd.moved&&e.type==='pointerup'; sd=null; if(click) cycleLength(); track.classList.remove('dragging'); try{track.releasePointerCapture(e.pointerId);}catch(x){} };
   track.addEventListener('pointerup',end); track.addEventListener('pointercancel',end);
 })();
 /* ---------- phone layout: keep map controls above the bottom sheet ---------- */
