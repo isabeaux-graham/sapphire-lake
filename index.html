@@ -101,6 +101,11 @@
       scroll-snap-type:x mandatory;scroll-padding:0 12px;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;scrollbar-width:none;
       padding:6px 12px 10px;margin:-6px -12px -10px}       /* extra padding so card shadows aren't clipped */
     .pager::-webkit-scrollbar{display:none}
+    .pager{pointer-events:auto;touch-action:pan-x pan-y}   /* the scroller itself must receive touches so swiping works */
+    .pager>.card{touch-action:pan-x pan-y}
+    /* ribbon bar is display-only on phones (no click / drag), so it never swallows a swipe */
+    .span-track,.span-fill{pointer-events:none;touch-action:auto;cursor:default}
+    .span-fill::before{display:none}
     .pager>.card{flex:0 0 calc(100% - 28px);min-width:0;scroll-snap-align:start;scroll-snap-stop:always}   /* narrower than the row so the next card's edge shows */
     .card{padding:12px 16px;border-radius:18px}
     h1{font-size:27px}
@@ -666,8 +671,9 @@ function updatePanel(){
   const slideTo=(dx)=>{   // move the ribbon by dx pixels of bar, keeping its length
     const dd=dx/sd.w*T.total; slideRibbonTo(T.d[sd.ra0]+dd,T.d[sd.rb0]-T.d[sd.ra0]);
   };
+  const phone=window.matchMedia('(max-width: 820px)');
   track.addEventListener('pointerdown',e=>{
-    if(!T) return; const r=track.getBoundingClientRect(); sd={x0:e.clientX,w:r.width||1,ra0:ra,rb0:rb,onFill:fill.contains(e.target),moved:false};
+    if(!T||phone.matches) return; const r=track.getBoundingClientRect(); sd={x0:e.clientX,w:r.width||1,ra0:ra,rb0:rb,onFill:fill.contains(e.target),moved:false};
     if(!fill.contains(e.target)){   // clicked the empty track: centre the ribbon there first, then keep dragging
       const dist=(e.clientX-r.left)/r.width*T.total, mid=(T.d[ra]+T.d[rb])/2; sd.x0=e.clientX; slideTo((dist-mid)/T.total*sd.w); sd.ra0=ra; sd.rb0=rb;
     }
